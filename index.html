@@ -22,8 +22,8 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #050510; f
 
 .main { flex: 1; display: flex; position: relative; overflow: hidden; }
 
-.canvas-wrap { flex: 1; position: relative; }
-canvas { position: absolute; top: 0; left: 0; display: block; }
+.canvas-wrap { flex: 1; position: relative; min-width: 0; }
+canvas { display: block; width: 100%; height: 100%; }
 
 .controls {
   position: absolute;
@@ -33,12 +33,13 @@ canvas { position: absolute; top: 0; left: 0; display: block; }
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0,0,0,0.75);
   backdrop-filter: blur(12px);
   border-radius: 999px;
   padding: 10px 20px;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.12);
   z-index: 10;
+  white-space: nowrap;
 }
 
 .btn-play {
@@ -50,6 +51,7 @@ canvas { position: absolute; top: 0; left: 0; display: block; }
   color: #fff;
   cursor: pointer;
   transition: background 0.2s;
+  flex-shrink: 0;
 }
 .btn-play:hover { background: rgba(255,255,255,0.2); }
 
@@ -224,6 +226,7 @@ input[type="range"]::-moz-range-thumb {
   var speed = 1;
   var selectedPlanet = null;
   var hoveredPlanet = null;
+  var lastHoveredPlanetData = null; // Сохраняем данные планеты при наведении
   var lastTime = 0;
   var stars = [];
 
@@ -270,39 +273,66 @@ input[type="range"]::-moz-range-thumb {
   function resize() {
     var dpr = window.devicePixelRatio || 1;
     var rect = canvasWrap.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = rect.height + 'px';
+    var w = rect.width;
+    var h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    generateStars(rect.width, rect.height);
+    generateStars(w, h);
+  }
+
+  // Используем ResizeObserver для отслеживания изменений размера canvasWrap
+  // (например, при появлении/исчезновении информационной панели)
+  if (typeof ResizeObserver !== 'undefined') {
+    var ro = new ResizeObserver(function() {
+      resize();
+    });
+    ro.observe(canvasWrap);
   }
   window.addEventListener('resize', resize);
   resize();
 
   function getCenter() {
-    var dpr = window.devicePixelRatio || 1;
-    return { x: (canvas.width / dpr) / 2, y: (canvas.height / dpr) / 2 };
+    var rect = canvasWrap.getBoundingClientRect();
+    return { x: rect.width / 2, y: rect.height / 2 };
   }
 
   function findPlanetAt(mx, my) {
     var c = getCenter();
+    // Ищем с большим радиусом попадания для удобства
     for (var i = planets.length - 1; i >= 0; i--) {
       var p = planets[i];
       var px = c.x + Math.cos(p.angle) * p.orbitRadius;
       var py = c.y + Math.sin(p.angle) * p.orbitRadius;
       var dist = Math.sqrt((mx-px)*(mx-px) + (my-py)*(my-py));
-      if (dist <= p.radius + 10) return p;
+      // Увеличенная зона попадания: радиус планеты + 15px
+      if (dist <= p.radius + 15) return p;
     }
     return null;
   }
 
-  canvas.addEventListener('click', function(e) {
+  // Используем mousedown вместо click для более надёжного срабатывания
+  canvas.addEventListener('mousedown', function(e) {
+    e.preventDefault();
     var rect = canvas.getBoundingClientRect();
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
+    
+    // Сначала пробуем найти планету по текущим координатам
     var p = findPlanetAt(mx, my);
-    selectedPlanet = p ? Object.assign({}, p) : null;
+    
+    // Если не нашли, используем последнюю планету под курсором (из mousemove)
+    if (!p && lastHoveredPlanetData) {
+      p = lastHoveredPlanetData;
+    }
+    
+    if (p) {
+      selectedPlanet = Object.assign({}, p);
+    } else {
+      selectedPlanet = null;
+    }
     renderInfoPanel();
   });
 
@@ -311,15 +341,30 @@ input[type="range"]::-moz-range-thumb {
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
     var p = findPlanetAt(mx, my);
-    hoveredPlanet = p ? p.name : null;
-    canvas.style.cursor = p ? 'pointer' : 'default';
+    
+    if (p) {
+      hoveredPlanet = p.name;
+      lastHoveredPlanetData = p; // Сохраняем данные планеты
+      canvas.style.cursor = 'pointer';
+    } else {
+      hoveredPlanet = null;
+      // НЕ сбрасываем lastHoveredPlanetData сразу — даём шанс клику
+      canvas.style.cursor = 'default';
+    }
   });
 
   canvas.addEventListener('mouseleave', function() {
     hoveredPlanet = null;
+    // Сбрасываем с задержкой, чтобы клик ещё мог сработать
+    setTimeout(function() {
+      if (!hoveredPlanet) {
+        lastHoveredPlanetData = null;
+      }
+    }, 300);
   });
 
-  btnPlay.addEventListener('click', function() {
+  btnPlay.addEventListener('click', function(e) {
+    e.stopPropagation();
     isPlaying = !isPlaying;
     iconPause.style.display = isPlaying ? 'block' : 'none';
     iconPlay.style.display = isPlaying ? 'none' : 'block';
@@ -354,6 +399,7 @@ input[type="range"]::-moz-range-thumb {
   function renderInfoPanel() {
     if (!selectedPlanet) {
       infoPanel.style.display = 'none';
+      // После скрытия панели canvasWrap изменит размер, ResizeObserver вызовет resize()
       return;
     }
     infoPanel.style.display = 'block';
@@ -379,14 +425,16 @@ input[type="range"]::-moz-range-thumb {
       '</div>' +
       '<div class="planet-order"><p>Порядок от Солнца:</p><div class="order-dots">'+orderDots+'</div></div>';
 
-    document.getElementById('closeInfo').addEventListener('click', function() {
+    document.getElementById('closeInfo').addEventListener('click', function(e) {
+      e.stopPropagation();
       selectedPlanet = null;
       infoPanel.style.display = 'none';
     });
 
     var dots = infoPanel.querySelectorAll('.order-dot');
     for (var j = 0; j < dots.length; j++) {
-      dots[j].addEventListener('click', function() {
+      dots[j].addEventListener('click', function(e) {
+        e.stopPropagation();
         var name = this.getAttribute('data-name');
         for (var k = 0; k < planetsData.length; k++) {
           if (planetsData[k].name === name) {
@@ -404,9 +452,9 @@ input[type="range"]::-moz-range-thumb {
     var dt = timestamp - lastTime;
     lastTime = timestamp;
 
-    var dpr = window.devicePixelRatio || 1;
-    var w = canvas.width / dpr;
-    var h = canvas.height / dpr;
+    var rect = canvasWrap.getBoundingClientRect();
+    var w = rect.width;
+    var h = rect.height;
     var cx = w / 2;
     var cy = h / 2;
 
