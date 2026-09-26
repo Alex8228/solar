@@ -1,6 +1,3 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import "./index.css";
-import App from "./App.tsx";
-
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+// This file exists for Vite build compatibility.
+// The actual app is rendered directly in index.html via inline script.
+export {};
